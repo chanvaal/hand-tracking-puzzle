@@ -1,43 +1,33 @@
+import asyncio
+import json
 import cv2
 import mediapipe as mp
-import asyncio
 import websockets
-import json
+import math
+import time
 
 mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(max_num_hands=1)
+mp.drawing = mp.solutions.drawing_utils
 
-async def handler(websocket):
-    cap = cv2.VideoCapture(0)
+hands = mp.hands.Hands(
+    static_image_mode=False,
+    max_num_hands=1,
+    min_detection_confidence=0.7,
+    min_tracking_confidence=0.6
+)
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            continue
+INDEX_TIP = 8
+INDEX_MCP = 5
+THUMB_TIP = 4
+MIDDLE_TIP = 12
+WRIST = 0
 
-        frame = cv2.flip(frame, 1)
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+def dist(a, b):
+    """Euclidean distance between two (x, y) tuples."""
+    return math.hypot(a[0] - b[0], a[1] - b[1])
 
-        results = hands.process(rgb)
+def is_finger_up(lm, tip_id, mcp_id):
+    """Return True if fingertip is above its MCP knuckle (extended finger)."""
+    return lm[tip_id].y < lm[mcp_id].y
 
-        fingertip = None
-
-        if results.multi_hand_landmarks:
-            hand = results.multi_hand_landmarks[0]
-            index_tip = hand.landmark[8]
-
-            fingertip = {
-                "x": index_tip.x,
-                "y": index_tip.y
-            }
-
-        await websocket.send(json.dumps({
-            "finger": fingertip
-        }))
-
-        await asyncio.sleep(0.03)
-
-start_server = websockets.serve(handler, "localhost", 8765)
-
-asyncio.get_event_loop().run_until_complete(start_server)
-asyncio.get_event_loop().run_forever()
+def detect_gesture(landmarks, frame_w, frame_h):
